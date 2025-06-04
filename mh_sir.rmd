@@ -1,0 +1,347 @@
+---
+title: "mh_nhanes"
+author: "Jon Day"
+date: "2025-05-14"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+## Load Libraries
+```{r}
+library(Hmisc)       # for read.xport
+library(foreign)     # legacy SAS import
+library(dplyr)       # data wrangling
+library(tidyr)       # for drop_na, fill, etc.
+library(mirt)        # for IRT modeling
+library(psych)       # for PCA / FA
+library(Matrix)      # for SVD
+library(caret)       # for preprocessing
+library(corrr)       # for correlation filtering
+library(readr)       # for read_csv
+library(mgcv)
+library(glmnet)
+```
+
+## Load and Merge NHANES Files
+```{r}
+files <- list(
+  BIOPRO = "P_BIOPRO.XPT",
+  BMX = "P_BMX.XPT",
+  BPQ = "P_BPQ.XPT",
+  BPXO = "P_BPXO.XPT",
+  CBC = "P_CBC.XPT",
+  CDQ = "P_CDQ.XPT",
+  COT = "P_COT.XPT",
+  DEMO = "P_DEMO.XPT",
+  DPQ = "P_DPQ.XPT",
+  FASTQX = "P_FASTQX.XPT",
+  GLU = "P_GLU.XPT",
+  FETIB = "P_FETIB.XPT",
+  GHB = "P_GHB.XPT",
+  HDL = "P_HDL.XPT",
+  HEPA = "P_HEPA.XPT",
+  HEPB_S = "P_HEPB_S.XPT",
+  HSCRP = "P_HSCRP.XPT",
+  IHGEM = "P_IHGEM.XPT",
+  INQ = "P_INQ.XPT",
+  INS = "P_INS.XPT",
+  MCQ = "P_MCQ.XPT",
+  PAQ = "P_PAQ.XPT",
+  PBCD = "P_PBCD.XPT",
+  TST = "P_TST.XPT",
+  TRIGLY = "P_TRIGLY.XPT",
+  UVOC = "P_UVOC.XPT",
+  UVOC2 = "P_UVOC2.XPT"
+)
+dfs <- lapply(files, function(f) as.data.frame(read.xport(f)))
+df <- Reduce(function(x, y) full_join(x, y, by = "SEQN"), dfs)
+```
+
+## Clean and Filter
+```{r}
+df <- df[rowMeans(is.na(df)) <= 0.5, ]
+df <- df[, colMeans(is.na(df)) <= 0.3]
+df <- df %>% mutate(across(where(is.numeric), ~ ifelse(abs(.) < 1e-50, 0, .)))
+```
+
+## Prepare PHQ-9 Data and Run IRT
+```{r}
+categorical_cols <- c('DPQ010','DPQ020','DPQ030','DPQ040','DPQ050','DPQ060','DPQ070','DPQ080','DPQ090')
+
+phq_data <- df[categorical_cols]
+phq_data <- lapply(phq_data, function(col) {
+  col <- as.numeric(col)
+  col[col %in% c(7, 9)] <- NA
+  return(col)
+}) %>% as.data.frame()
+
+phq_data_valid <- phq_data[rowSums(!is.na(phq_data)) > 0, ]
+
+mod <- mirt(phq_data_valid, 1, itemtype = "graded", verbose = FALSE)
+theta_scores <- fscores(mod, method = "EAP")
+df$eta_hat <- NA
+df$eta_hat[as.integer(rownames(phq_data_valid))] <- theta_scores[, 1]
+```
+
+```{r}
+phq_totals <- rowSums(phq_data_valid, na.rm=TRUE)
+plot(density(log(phq_totals>0)))
+```
+
+
+## Prepare X and y for SIR
+```{r}
+y <- df$eta_hat
+X <- df %>%
+  select(-all_of(c("SEQN", categorical_cols, "eta_hat"))) %>%
+  select(where(is.numeric))
+
+X_imputed <- X %>% mutate(across(everything(), ~ ifelse(is.na(.), mean(., na.rm = TRUE), .)))
+nzv <- nearZeroVar(X_imputed, saveMetrics = TRUE)
+X_reduced <- X_imputed[, !nzv$nzv]
+
+cor_matrix <- cor(X_reduced, use = "pairwise.complete.obs")
+high_corr <- findCorrelation(cor_matrix, cutoff = 0.98)
+X_deduped <- X_reduced[, -high_corr]
+```
+
+## SVD Full-Rank Approximation
+```{r}
+X_centered <- scale(X_deduped, center = TRUE, scale = TRUE)
+svd_out <- svd(X_centered)
+rank <- sum(svd_out$d > 1e-10)
+
+X_fullrank <- svd_out$u[, 1:rank] %*% diag(svd_out$d[1:rank]) %*% t(svd_out$v[, 1:rank])
+X_fullrank <- X_fullrank + matrix(rnorm(prod(dim(X_fullrank)), 0, 1e-10), nrow = nrow(X_fullrank))
+```
+
+## SIR Construction
+```{r}
+H <- 10
+breaks <- unique(quantile(y, probs = seq(0, 1, length.out = H + 1), na.rm = TRUE))
+y_sliced <- cut(y, breaks = breaks, include.lowest = TRUE, labels = FALSE)
+
+p_h <- as.numeric(table(y_sliced)) / length(y_sliced)
+x_bar <- colMeans(X_centered)
+
+M <- matrix(0, ncol = ncol(X_centered), nrow = ncol(X_centered))
+for (h in 1:H) {
+  idx <- which(y_sliced == h)
+  if (length(idx) > 1) {
+    xh <- colMeans(X_centered[idx, , drop = FALSE])
+    diff <- xh - x_bar
+    M <- M + p_h[h] * (diff %*% t(diff))
+  }
+}
+
+Sigma_x <- cov(X_centered)
+Sigma_x_reg <- Sigma_x + diag(1e-8, ncol(Sigma_x))
+eig <- eigen((solve(Sigma_x_reg) %*% M + t(solve(Sigma_x_reg) %*% M)) / 2)
+```
+
+## SIR Projection and Loadings
+```{r}
+d <- 2
+sir_directions <- eig$vectors[, 1:d]
+X_sir <- X_centered %*% sir_directions
+
+sir_loadings <- data.frame(Variable = colnames(X_centered),
+                           SIR1 = sir_directions[, 1]) %>%
+  arrange(desc(abs(SIR1)))
+head(sir_loadings, 10)
+
+sir_loadings <- data.frame(Variable = colnames(X_centered),
+                           SIR1 = sir_directions[, 1], 
+                           SIR2 = sir_directions[, 2]) %>%
+  arrange(desc(abs(SIR2)))
+head(sir_loadings, 10)
+```
+
+## Final Checks
+```{r}
+# Compute loadings for both directions
+sir_loadings <- data.frame(
+  Variable = colnames(X_centered),
+  SIR1 = sir_directions[, 1],
+  SIR2 = sir_directions[, 2]
+)
+
+# Top 10 absolute loadings for SIR1
+top_sir1 <- sir_loadings %>%
+  arrange(desc(abs(SIR1))) %>%
+  slice(1:10)
+
+# Top 10 absolute loadings for SIR2
+top_sir2 <- sir_loadings %>%
+  arrange(desc(abs(SIR2))) %>%
+  slice(1:10)
+
+# Optional: print for checking
+top_sir1 %>% select(Variable, SIR1)
+top_sir2 %>% select(Variable, SIR2)
+```
+
+```{r}
+model <- glm(eta_hat ~ LBDSTPSI + LBXWBCSI, data = df, family = gaussian())
+plot(model)
+```
+
+
+```{r}
+phq_cat <- cut(y,
+               breaks = c(-Inf, 0, 1, 2, 3, Inf),
+               labels = c("Minimal", "Mild", "Moderate", "Mod-Severe", "Severe"))
+plot(X_sir, col = as.numeric(phq_cat), pch = 19,
+     xlab = "SIR1", ylab = "SIR2", main = "SIR Projection by Severity")
+legend("topleft", legend = levels(phq_cat), col = 1:5, pch = 19)
+```
+
+```{r}
+# Define categorical severity levels
+phq_cat <- cut(y,
+               breaks = c(-Inf, 0, 1, 2, 3, Inf),
+               labels = c("Minimal", "Mild", "Moderate", "Mod-Severe", "Severe"))
+
+# Create a data frame for plotting
+sir_df <- as.data.frame(X_sir)
+colnames(sir_df) <- c("SIR1", "SIR2")
+sir_df$Severity <- phq_cat
+
+# Filter out NA severity values
+sir_df <- sir_df %>% filter(!is.na(Severity) & SIR1 > -5)
+
+# Plot using ggplot2
+ggplot(sir_df, aes(x = SIR1, y = SIR2, color = Severity)) +
+  geom_point(alpha = 0.7, size = 1.8) +
+  scale_color_manual(values = c("black", "green3", "dodgerblue", "deeppink", "cyan3")) +
+  labs(
+    title = "SIR Projection by PHQ-9 Depression Severity",
+    x = "SIR1",
+    y = "SIR2"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 12),
+    legend.box = "horizontal",
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+```
+
+
+```{r}
+# Define complete subset
+idx <- complete.cases(y, X_sir[,1])
+
+# Re-plot
+plot(y[idx], X_sir[idx,1], pch = 19, col = rgb(0,0,0,0.1),
+     xlab = "IRT Theta", ylab = "SIR1", main = "SIR1 vs Latent Depression")
+
+# Add smoothed line
+lines(lowess(y[idx], X_sir[idx,1]), col = "red", lwd = 2)
+
+# Re-plot
+plot(y[idx], X_sir[idx,2], pch = 19, col = rgb(0,0,0,0.1), 
+     xlab = "IRT Theta", ylab = "SIR2", main = "SIR2 vs Latent Depression")
+
+# Add smoothed line
+lines(lowess(y[idx], X_sir[idx,2]), col = "red", lwd = 2)
+```
+
+```{r}
+summary(lm(y ~ X_sir[,1] + X_sir[,2]))
+```
+
+```{r}
+# Keep only complete rows
+idx <- complete.cases(y, X_sir[,1], X_sir[,2])
+
+# Fit model on complete cases
+model <- lm(y[idx] ~ X_sir[idx,1] + X_sir[idx,2])
+y_hat <- predict(model)
+
+# Plot
+plot(y[idx], y_hat, pch = 20, col = rgb(0, 0, 0, 0.3),
+     xlab = "True IRT Theta", ylab = "Predicted via SIR",
+     main = "Model Fit with SIR1 + SIR2")
+```
+
+
+```{r}
+# Use complete cases
+idx <- complete.cases(y, X_sir[,1:2])
+
+# Fit GAM with smooth terms
+gam_model <- gam(y[idx] ~ s(X_sir[idx,1]) + s(X_sir[idx,2]), method = "REML")
+
+# Summary
+summary(gam_model)
+```
+```{r}
+plot(gam_model, pages = 1, shade = TRUE)
+```
+
+```{r}
+y_gam <- predict(gam_model)
+
+# Plot predictions vs actual
+plot(y[idx], y_gam, pch = 20, col = rgb(0, 0, 0, 0.3),
+     xlab = "True IRT Theta", ylab = "GAM Prediction",
+     main = "GAM Fit using SIR1 + SIR2")
+```
+
+
+### PCA Comparison
+```{r}
+pca_out <- prcomp(X_centered, center = FALSE, scale. = FALSE)
+X_pca <- pca_out$x[, 1:2]  # First two PCs
+plot(X_pca, col = as.numeric(phq_cat), pch = 19,
+     xlab = "PC1", ylab = "PC2", main = "PCA Projection by Severity")
+legend("topright", legend = levels(phq_cat), col = 1:5, pch = 19)
+```
+
+
+```{r}
+plot(y[idx], X_pca[idx,1], pch = 19, col = rgb(0,0,0,0.1),
+     xlab = "IRT Theta", ylab = "PC1", main = "PC1 vs Latent Depression")
+lines(lowess(y[idx], X_pca[idx,1]), col = "red", lwd = 2)
+```
+
+### Regression of theta on 3 top biomarkers from SIR1
+```{r}
+lm_model <- lm(eta_hat ~ LBDSGBSI + LBDSTPSI + LBDSALSI + LBDLYMNO + MCQ520, data = df)
+summary(lm_model)
+```
+
+### LASSO Lets GO!
+```{r}
+# 1. Ensure X_centered and eta_hat are aligned and clean
+X <- as.matrix(X_centered)
+y <- df$eta_hat
+
+# Remove rows with NA in either X or y
+idx <- complete.cases(X, y)
+X_clean <- X[idx, ]
+y_clean <- y[idx]
+
+
+# 2. Fit LASSO with cross-validation
+cv_lasso <- cv.glmnet(X_clean, y_clean, alpha = 1, standardize = FALSE)  # alpha = 1 for LASSO
+best_lambda <- cv_lasso$lambda.min
+
+# 3. Extract non-zero coefficients
+lasso_coef <- coef(cv_lasso, s = best_lambda)
+active <- lasso_coef[lasso_coef[, 1] != 0, , drop = FALSE]
+active <- as.data.frame(as.matrix(active))
+active$Variable <- rownames(active)
+colnames(active)[1] <- "Coefficient"
+active <- active[order(-abs(active$Coefficient)), ]
+
+# 4. View top selected variables (excluding intercept)
+active_vars <- active[active$Variable != "(Intercept)", ]
+head(active_vars, 30)
+```
+
