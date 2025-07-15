@@ -1,0 +1,14 @@
+CDC/NCHS. National Health and Nutrition Examination Survey: 2017–2020 Data. [Accessed May 2025] 
+Foley SF, Kirschbaum C, Grotegerd D, et al. Peripheral blood cellular immunophenotype in depression: a systematic review and meta-analysis. Molecular Psychiatry. 2023.
+Köhler-Forsberg O, Buttenschøn HN, Tansey KE, et al. White blood cell count at first depression diagnosis as predictor for risk of subsequent hospitalization. Neurology, Psychiatry and Brain Research. 2017.
+Mazza MG, Lucchi S, Tringali A, et al. Neutrophil/lymphocyte ratio and platelet/lymphocyte ratio in mood disorders: a meta-analysis. Prog Neuropsychopharmacol Biol Psychiatry. 2018;84:229–236.
+Osimo EF, Baxter LJ, Lewis G, et al. Prevalence of low-grade inflammation in depression: a systematic review and meta-analysis of CRP levels. Psychological Medicine. 2019;49(11):1958–1970.
+Sealock JM, Davis LK, Gymrek M, et al. Depression polygenic scores and white blood cell count. JAMA Psychiatry. 2021;78(12):1340–1350.
+Kroenke K, Spitzer RL, Williams JB. The PHQ-9: validity of a brief depression severity measure. J Gen Intern Med. 2001;16(9):606–613.
+Li K-C. Sliced inverse regression for dimension reduction. J Am Stat Assoc. 1991;86(414):316–327.
+McCullagh P. Regression models for ordinal data. J Royal Stat Soc B. 1980;42(2):109–127.
+Samejima F. Estimation of latent ability using a response pattern of graded scores. Psychometrika Monograph Supplement. 1969;34(4, Pt.2):100.
+Golub GH, Van Loan CF. Matrix Computations, 4th Edition. Johns Hopkins Univ. Press, 2013.
+Hansen PC. The truncated SVD as a method for regularization. BIT Numer Math. 1987;27(4):534–553.
+Tikhonov AN, Arsenin VY. Solutions of Ill-posed Problems. Wiley, 1977.
+Kuhn M. caret: Classification and Regression Training. R package, 2023.
