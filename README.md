@@ -40,7 +40,7 @@ We leverage modern statistical and machine learning approaches to uncover which 
 ### **1. Bayesian Graded Response Modeling**
 
 - **Why:** Move beyond simple sum scores of PHQ-9 items; capture individual and item-level uncertainty in depression measurement.
-- **How:** Fit a BGRM to estimate continuous latent depression (`\(\hat{\theta}_i\)`) for each participant, integrating item difficulties and response patterns.
+- **How:** Fit a BGRM to estimate continuous latent depression $\hat{\theta}_i$ for each participant, integrating item difficulties and response patterns.
 
 ### **2. Feature Selection & Dimension Reduction**
 
