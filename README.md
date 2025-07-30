@@ -42,6 +42,8 @@ We leverage modern statistical and machine learning approaches to uncover which 
 - **Why:** Move beyond simple sum scores of PHQ-9 items; capture individual and item-level uncertainty in depression measurement.
 - **How:** Fit a BGRM to estimate continuous latent depression $\hat{\theta}_i$ for each participant, integrating item difficulties and response patterns.
 
+![Distribution of Latent Depression Scores](figures/dep_plot.png)
+
 ### **2. Feature Selection & Dimension Reduction**
 
 - **SIR (Sliced Inverse Regression):** Supervised technique to find linear combinations of predictors most strongly associated with depression severity.
