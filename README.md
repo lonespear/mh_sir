@@ -31,7 +31,7 @@ We leverage modern statistical and machine learning approaches to uncover which 
 
 ## Pipeline Diagram
 
-![Analysis Pipeline Schematic](figures/overview.png)
+![Analysis Pipeline Schematic](figures/workflow.png)
 
 ---
 
@@ -57,7 +57,7 @@ Variables were classified into **five clinically meaningful categories** for int
 
 ## Top Predictors Table
 
-![Top Predictors Table](figures/top_predictors_table.png)
+![Top Predictors Table](figures/sum_table.png)
 
 *Each cell is color-coded by variable group. See key below.*
 
