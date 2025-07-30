@@ -31,7 +31,7 @@ We leverage modern statistical and machine learning approaches to uncover which 
 
 ## Pipeline Diagram
 
-![Analysis Pipeline Schematic](figures/pipeline_placeholder.png)
+![Analysis Pipeline Schematic](figures/overview.png)
 
 ---
 
