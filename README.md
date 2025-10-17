@@ -1,6 +1,6 @@
 # NHANES Depression Severity: Feature Selection & Biological Correlates
 
-_A JSM 2024 Poster Companion | Bayesian Modeling, SIR, & Interpretable Machine Learning in Population Mental Health_
+_A JSM 2025 Poster Companion | Bayesian Modeling, SIR, & Interpretable Machine Learning in Population Mental Health_
 
 ---
 
